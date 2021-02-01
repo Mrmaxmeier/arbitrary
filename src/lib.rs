@@ -29,6 +29,7 @@ mod error;
 pub use error::*;
 
 pub mod unstructured;
+pub use unstructured::Destructured;
 #[doc(inline)]
 pub use unstructured::Unstructured;
 
@@ -286,6 +287,12 @@ pub trait Arbitrary: Sized + 'static {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         empty()
     }
+
+    /// Experiments with reversible arbitrary
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        let _ = buf;
+        unimplemented!();
+    }
 }
 
 impl Arbitrary for () {
@@ -297,6 +304,8 @@ impl Arbitrary for () {
     fn size_hint(_depth: usize) -> (usize, Option<usize>) {
         (0, Some(0))
     }
+
+    fn into_arbitrary_bytes(self, _buf: &mut Destructured) {}
 }
 
 impl Arbitrary for bool {
@@ -311,6 +320,10 @@ impl Arbitrary for bool {
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         Box::new(if *self { once(false) } else { empty() })
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_u8(self as u8);
     }
 }
 
@@ -347,6 +360,13 @@ macro_rules! impl_arbitrary_for_integers {
                             Some(x)
                         }
                     })))
+                }
+
+                fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+                    let v = self as $unsigned;
+                    for i in 0..mem::size_of::<$ty>() {
+                        buf.push_u8((v >> (i * 8)) as u8);
+                    }
                 }
             }
         )*
@@ -411,6 +431,10 @@ macro_rules! impl_arbitrary_for_floats {
                         })))
                     }
                 }
+
+                fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+                    self.to_bits().into_arbitrary_bytes(buf);
+                }
             }
         )*
     }
@@ -450,6 +474,10 @@ impl Arbitrary for char {
             char::try_from(x).ok()
         }))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        (self as u32).into_arbitrary_bytes(buf);
+    }
 }
 
 impl Arbitrary for AtomicBool {
@@ -469,6 +497,10 @@ impl Arbitrary for AtomicBool {
             empty()
         }
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().into_arbitrary_bytes(buf);
+    }
 }
 
 impl Arbitrary for AtomicIsize {
@@ -485,6 +517,10 @@ impl Arbitrary for AtomicIsize {
         let x = self.load(Ordering::SeqCst);
         Box::new(x.shrink().map(Self::new))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().into_arbitrary_bytes(buf);
+    }
 }
 
 impl Arbitrary for AtomicUsize {
@@ -500,6 +536,10 @@ impl Arbitrary for AtomicUsize {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         let x = self.load(Ordering::SeqCst);
         Box::new(x.shrink().map(Self::new))
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().into_arbitrary_bytes(buf);
     }
 }
 
@@ -645,6 +685,13 @@ impl<A: Arbitrary> Arbitrary for Option<A> {
             empty()
         }
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.is_some().into_arbitrary_bytes(buf);
+        if let Some(val) = self {
+            val.into_arbitrary_bytes(buf);
+        }
+    }
 }
 
 impl<A: Arbitrary, B: Arbitrary> Arbitrary for std::result::Result<A, B> {
@@ -671,6 +718,14 @@ impl<A: Arbitrary, B: Arbitrary> Arbitrary for std::result::Result<A, B> {
         match *self {
             Ok(ref a) => Box::new(a.shrink().map(Ok)),
             Err(ref b) => Box::new(b.shrink().map(Err)),
+        }
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.is_ok().into_arbitrary_bytes(buf);
+        match self {
+            Ok(val) => val.into_arbitrary_bytes(buf),
+            Err(val) => val.into_arbitrary_bytes(buf),
         }
     }
 }
@@ -707,6 +762,13 @@ macro_rules! arbitrary_tuple {
                 Box::new(iter::from_fn(move || {
                     Some(( $( $xs.next()? ,)* $last.next()?, ))
                 }))
+            }
+
+            #[allow(non_snake_case)]
+            fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+                let ( $( $xs, )* $last, ) = self;
+                ($($xs,)*).into_arbitrary_bytes(buf);
+                $last.into_arbitrary_bytes(buf);
             }
         }
     };
@@ -766,6 +828,18 @@ macro_rules! arbitrary_array {
                     ])
                 }))
             }
+
+            fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+                match self {
+                    [
+                        first,
+                        $($as,)*
+                    ] => {
+                        first.into_arbitrary_bytes(buf);
+                        $($as.into_arbitrary_bytes(buf);)*
+                    }
+                }
+            }
         }
     };
     ($n: expr,) => {};
@@ -788,6 +862,8 @@ impl<T: Arbitrary> Arbitrary for [T; 0] {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         Box::new(iter::from_fn(|| None))
     }
+
+    fn into_arbitrary_bytes(self, _buf: &mut Destructured) {}
 }
 
 arbitrary_array! { 32, (T, a) (T, b) (T, c) (T, d) (T, e) (T, f) (T, g) (T, h)
@@ -842,6 +918,10 @@ impl<A: Arbitrary> Arbitrary for Vec<A> {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         shrink_collection(self.iter(), |x| x.shrink())
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
+    }
 }
 
 impl<K: Arbitrary + Ord, V: Arbitrary> Arbitrary for BTreeMap<K, V> {
@@ -863,6 +943,10 @@ impl<K: Arbitrary + Ord, V: Arbitrary> Arbitrary for BTreeMap<K, V> {
             shrink_collection(self.iter(), |(k, v)| Box::new(k.shrink().zip(v.shrink())));
         Box::new(collections.map(|entries| entries.into_iter().collect()))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
+    }
 }
 
 impl<A: Arbitrary + Ord> Arbitrary for BTreeSet<A> {
@@ -883,6 +967,10 @@ impl<A: Arbitrary + Ord> Arbitrary for BTreeSet<A> {
         let collections = shrink_collection(self.iter(), |v| v.shrink());
         Box::new(collections.map(|entries| entries.into_iter().collect()))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
+    }
 }
 
 impl<A: Arbitrary + Ord> Arbitrary for BinaryHeap<A> {
@@ -902,6 +990,10 @@ impl<A: Arbitrary + Ord> Arbitrary for BinaryHeap<A> {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         let collections = shrink_collection(self.iter(), |v| v.shrink());
         Box::new(collections.map(|entries| entries.into_iter().collect()))
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
     }
 }
 
@@ -924,6 +1016,10 @@ impl<K: Arbitrary + Eq + ::std::hash::Hash, V: Arbitrary> Arbitrary for HashMap<
             shrink_collection(self.iter(), |(k, v)| Box::new(k.shrink().zip(v.shrink())));
         Box::new(collections.map(|entries| entries.into_iter().collect()))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
+    }
 }
 
 impl<A: Arbitrary + Eq + ::std::hash::Hash> Arbitrary for HashSet<A> {
@@ -943,6 +1039,10 @@ impl<A: Arbitrary + Eq + ::std::hash::Hash> Arbitrary for HashSet<A> {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         let collections = shrink_collection(self.iter(), |v| v.shrink());
         Box::new(collections.map(|entries| entries.into_iter().collect()))
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
     }
 }
 
@@ -964,6 +1064,10 @@ impl<A: Arbitrary> Arbitrary for LinkedList<A> {
         let collections = shrink_collection(self.iter(), |v| v.shrink());
         Box::new(collections.map(|entries| entries.into_iter().collect()))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
+    }
 }
 
 impl<A: Arbitrary> Arbitrary for VecDeque<A> {
@@ -983,6 +1087,10 @@ impl<A: Arbitrary> Arbitrary for VecDeque<A> {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         let collections = shrink_collection(self.iter(), |v| v.shrink());
         Box::new(collections.map(|entries| entries.into_iter().collect()))
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        buf.push_iter(self.into_iter());
     }
 }
 
@@ -1006,6 +1114,13 @@ where
         match *self {
             Cow::Owned(ref o) => Box::new(o.shrink().map(Cow::Owned)),
             Cow::Borrowed(b) => Box::new(b.to_owned().shrink().map(Cow::Owned)),
+        }
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        match self {
+            Cow::Owned(o) => o.into_arbitrary_bytes(buf),
+            Cow::Borrowed(_) => panic!("into_arbitrary_bytes for Cow::Borrowed"),
         }
     }
 }
@@ -1045,6 +1160,14 @@ impl Arbitrary for String {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         let collections = shrink_collection(self.chars(), |ch| ch.shrink());
         Box::new(collections.map(|chars| chars.into_iter().collect()))
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        assert!(self.len() <= u8::MAX as usize);
+        buf.push_u8(self.len() as u8);
+        for el in self.as_bytes() {
+            buf.push_u8(*el);
+        }
     }
 }
 
@@ -1116,6 +1239,10 @@ impl<A: Arbitrary> Arbitrary for Box<A> {
 
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         Box::new((&**self).shrink().map(Self::new))
+    }
+
+    fn into_arbitrary_bytes(self, _buf: &mut Destructured) {
+        todo!();
     }
 }
 
@@ -1206,6 +1333,10 @@ impl<A: Arbitrary> Arbitrary for Cell<A> {
     // Note: can't implement `shrink` without either more trait bounds on `A`
     // (copy or default) or `Cell::update`:
     // https://github.com/rust-lang/rust/issues/50186
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().into_arbitrary_bytes(buf);
+    }
 }
 
 impl<A: Arbitrary> Arbitrary for RefCell<A> {
@@ -1222,6 +1353,10 @@ impl<A: Arbitrary> Arbitrary for RefCell<A> {
         let x = self.borrow();
         Box::new(x.shrink().map(Self::new))
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().into_arbitrary_bytes(buf);
+    }
 }
 
 impl<A: Arbitrary> Arbitrary for UnsafeCell<A> {
@@ -1236,6 +1371,10 @@ impl<A: Arbitrary> Arbitrary for UnsafeCell<A> {
 
     // We can't non-trivially (i.e. not an empty iterator) implement `shrink` in
     // a safe way, since we don't have a safe way to get the inner value.
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().into_arbitrary_bytes(buf);
+    }
 }
 
 impl<A: Arbitrary> Arbitrary for Mutex<A> {
@@ -1254,6 +1393,10 @@ impl<A: Arbitrary> Arbitrary for Mutex<A> {
             Ok(g) => Box::new(g.shrink().map(Self::new)),
         }
     }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.into_inner().unwrap().into_arbitrary_bytes(buf);
+    }
 }
 
 impl<A: Arbitrary> Arbitrary for iter::Empty<A> {
@@ -1267,6 +1410,8 @@ impl<A: Arbitrary> Arbitrary for iter::Empty<A> {
     }
 
     // Nothing to shrink here.
+
+    fn into_arbitrary_bytes(self, _buf: &mut Destructured) {}
 }
 
 impl<A: Arbitrary> Arbitrary for ::std::marker::PhantomData<A> {
@@ -1280,6 +1425,8 @@ impl<A: Arbitrary> Arbitrary for ::std::marker::PhantomData<A> {
     }
 
     // Nothing to shrink here.
+
+    fn into_arbitrary_bytes(self, _buf: &mut Destructured) {}
 }
 
 impl<A: Arbitrary> Arbitrary for ::std::num::Wrapping<A> {
@@ -1295,6 +1442,10 @@ impl<A: Arbitrary> Arbitrary for ::std::num::Wrapping<A> {
     fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
         let ref x = self.0;
         Box::new(x.shrink().map(::std::num::Wrapping))
+    }
+
+    fn into_arbitrary_bytes(self, buf: &mut Destructured) {
+        self.0.into_arbitrary_bytes(buf);
     }
 }
 

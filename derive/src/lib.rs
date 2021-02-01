@@ -11,6 +11,7 @@ pub fn derive_arbitrary(tokens: proc_macro::TokenStream) -> proc_macro::TokenStr
     let arbitrary_method = gen_arbitrary_method(&input);
     let size_hint_method = gen_size_hint_method(&input);
     let shrink_method = gen_shrink_method(&input);
+    let into_arbitrary_bytes_method = gen_into_arbitrary_bytes_method(&input);
     let name = input.ident;
     // Add a bound `T: Arbitrary` to every type parameter T.
     let generics = add_trait_bounds(input.generics);
@@ -20,6 +21,7 @@ pub fn derive_arbitrary(tokens: proc_macro::TokenStream) -> proc_macro::TokenStr
             #arbitrary_method
             #size_hint_method
             #shrink_method
+            #into_arbitrary_bytes_method
         }
     })
     .into()
@@ -90,6 +92,81 @@ fn gen_arbitrary_method(input: &DeriveInput) -> TokenStream {
                     })
                 }
             }
+        }
+    }
+}
+
+fn gen_into_arbitrary_bytes_method(input: &DeriveInput) -> TokenStream {
+    let ident = &input.ident;
+    let into_arbitrary_bytes_structlike = |fields| {
+        let inner = into_arbitrary_bytes(fields, |i, field| match &field.ident {
+            Some(i) => quote!(&self.#i),
+            None => {
+                let i = Literal::usize_unsuffixed(i);
+                quote!(&self.#i)
+            }
+        });
+        quote! {
+            fn into_arbitrary_bytes(self, d: &mut arbitrary::Destructured) {
+                #inner
+            }
+        }
+    };
+
+    return match &input.data {
+        Data::Struct(data) => into_arbitrary_bytes_structlike(&data.fields),
+        Data::Union(data) => into_arbitrary_bytes_structlike(&Fields::Named(data.fields.clone())),
+        Data::Enum(data) => {
+            let count = data.variants.len() as u64;
+            let variants = data.variants.iter().enumerate().map(|(i, variant)| {
+                let mut binding_names = Vec::new();
+                let bindings = match &variant.fields {
+                    Fields::Named(_) => {
+                        let names = variant.fields.iter().map(|f| {
+                            let name = f.ident.as_ref().unwrap();
+                            binding_names.push(quote!(#name));
+                            name
+                        });
+                        quote!({#(#names),*})
+                    }
+                    Fields::Unnamed(_) => {
+                        let names = (0..variant.fields.len()).map(|i| {
+                            let name = quote::format_ident!("f{}", i);
+                            binding_names.push(quote!(#name));
+                            name
+                        });
+                        quote!((#(#names),*))
+                    }
+                    Fields::Unit => quote!(),
+                };
+                let variant_name = &variant.ident;
+                let inner = into_arbitrary_bytes(&variant.fields, |i, _| binding_names[i].clone());
+                let tag = (((((i + 1) as u64) << 32) / count) - 1) as u32;
+                quote!(#ident::#variant_name #bindings => {
+                    arbitrary::Arbitrary::into_arbitrary_bytes(#tag, d);
+                    #inner
+                })
+            });
+            quote! {
+                fn into_arbitrary_bytes(self, d: &mut arbitrary::Destructured) {
+                    match self {
+                        #(#variants)*
+                    }
+                }
+            }
+        }
+    };
+
+    fn into_arbitrary_bytes(
+        fields: &Fields,
+        access_field: impl Fn(usize, &Field) -> TokenStream,
+    ) -> TokenStream {
+        let iters = fields.iter().enumerate().map(|(i, f)| {
+            let field = access_field(i, f);
+            quote! { arbitrary::Arbitrary::into_arbitrary_bytes(#field, d); }
+        });
+        quote! {
+            #(#iters)*
         }
     }
 }

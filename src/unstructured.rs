@@ -555,6 +555,27 @@ impl<'a, ElementType: Arbitrary> Iterator for ArbitraryTakeRestIter<'a, ElementT
     }
 }
 
+/// TODO: Docs
+pub struct Destructured {
+    buffer: Vec<u8>,
+}
+
+impl Destructured {
+    /// TODO: Docs
+    pub fn push_u8(&mut self, val: u8) {
+        self.buffer.push(val);
+    }
+
+    /// TODO: Docs
+    pub fn push_iter<T: Arbitrary>(&mut self, it: impl Iterator<Item=T>) {
+        for el in it {
+            self.push_u8(true as u8);
+            el.into_arbitrary_bytes(self);
+        }
+        self.push_u8(false as u8);
+    }
+}
+
 /// A trait that is implemented for all of the primitive integers:
 ///
 /// * `u8`
