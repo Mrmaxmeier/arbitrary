@@ -25,6 +25,7 @@ derive_arbitrary = { version = "~1.4.0", path = "./derive", optional = true }
 [features]
 # Turn this feature on to enable support for `#[derive(Arbitrary)]`.
 derive = ["derive_arbitrary"]
+simple-encoding = []
 
 [[example]]
 name = "derive_enum"

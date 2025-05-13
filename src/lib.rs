@@ -430,6 +430,7 @@ mod test {
     use super::*;
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn exhausted_entropy() {
         let mut u = Unstructured::new(&[]);
         assert_eq!(u.arbitrary::<bool>().unwrap(), false);

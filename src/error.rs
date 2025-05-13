@@ -15,6 +15,8 @@ pub enum Error {
     NotEnoughData,
     /// The input bytes were not of the right format
     IncorrectFormat,
+    /// Parsed value was out-of-range or unexpected
+    InvalidValue,
 }
 
 impl fmt::Display for Error {
@@ -32,6 +34,7 @@ impl fmt::Display for Error {
                 f,
                 "The raw data is not of the correct format to construct this type"
             ),
+            Error::InvalidValue => write!(f, "Parsed value was out-of-range or unexpected"),
         }
     }
 }

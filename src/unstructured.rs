@@ -215,13 +215,30 @@ impl<'a> Unstructured<'a> {
     where
         ElementType: Arbitrary<'a>,
     {
-        let byte_size = self.arbitrary_byte_size()?;
-        let (lower, upper) = <ElementType as Arbitrary>::size_hint(0);
-        let elem_size = upper.unwrap_or(lower * 2);
-        let elem_size = std::cmp::max(1, elem_size);
-        Ok(byte_size / elem_size)
+        if cfg!(feature = "simple-encoding") {
+            self.arbitrary_byte_size()
+        } else {
+            let byte_size = self.arbitrary_byte_size()?;
+            let (lower, upper) = <ElementType as Arbitrary>::size_hint(0);
+            let elem_size = upper.unwrap_or(lower * 2);
+            let elem_size = std::cmp::max(1, elem_size);
+            Ok(byte_size / elem_size)
+        }
     }
 
+    #[cfg_attr(not(feature = "simple-encoding"), expect(unused))]
+    fn arbitrary_u32(&mut self) -> Result<u32> {
+        let mut buf = [0; 4];
+        self.fill_buffer(&mut buf)?;
+        Ok(u32::from_le_bytes(buf))
+    }
+
+    #[cfg(feature = "simple-encoding")]
+    fn arbitrary_byte_size(&mut self) -> Result<usize> {
+        Ok(self.arbitrary_u32()? as usize)
+    }
+
+    #[cfg(not(feature = "simple-encoding"))]
     fn arbitrary_byte_size(&mut self) -> Result<usize> {
         if self.data.is_empty() {
             Ok(0)
@@ -301,11 +318,46 @@ impl<'a> Unstructured<'a> {
     where
         T: Int,
     {
+        #[cfg(feature = "simple-encoding")]
+        let result = self.int_in_range_impl(range)?;
+        #[cfg(not(feature = "simple-encoding"))]
         let (result, bytes_consumed) = Self::int_in_range_impl(range, self.data.iter().cloned())?;
-        self.data = &self.data[bytes_consumed..];
+        #[cfg(not(feature = "simple-encoding"))]
+        {
+            self.data = &self.data[bytes_consumed..];
+        }
         Ok(result)
     }
 
+    #[cfg(feature = "simple-encoding")]
+    fn int_in_range_impl<T>(&mut self, range: ops::RangeInclusive<T>) -> Result<T>
+    where
+        T: Int,
+    {
+        let start = *range.start();
+        let end = *range.end();
+        assert!(
+            start <= end,
+            "`arbitrary::Unstructured::int_in_range` requires a non-empty range"
+        );
+
+        // let mut buf = [0; T::Unsigned::BYTES];
+        let mut buf = [0; 16];
+        let buf = &mut buf[..T::Unsigned::BYTES];
+        self.fill_buffer(buf)?;
+
+        let Some(res) = T::from_le_bytes(buf) else {
+            unreachable!()
+        };
+
+        if res < start || res > end {
+            return Err(Error::InvalidValue);
+        }
+
+        Ok(res)
+    }
+
+    #[cfg(not(feature = "simple-encoding"))]
     fn int_in_range_impl<T>(
         range: ops::RangeInclusive<T>,
         mut bytes: impl Iterator<Item = u8>,
@@ -575,6 +627,10 @@ impl<'a> Unstructured<'a> {
     /// assert_eq!(buf, [0, 0]);
     /// ```
     pub fn fill_buffer(&mut self, buffer: &mut [u8]) -> Result<()> {
+        #[cfg(feature = "simple-encoding")]
+        if self.data.len() < buffer.len() {
+            return Err(Error::NotEnoughData);
+        }
         let n = std::cmp::min(buffer.len(), self.data.len());
         buffer[..n].copy_from_slice(&self.data[..n]);
         for byte in buffer[n..].iter_mut() {
@@ -632,6 +688,7 @@ impl<'a> Unstructured<'a> {
     ///
     /// assert!(u.peek_bytes(4).is_none());
     /// ```
+    #[cfg_attr(feature = "simple-encoding", deprecated)]
     pub fn peek_bytes(&self, size: usize) -> Option<&'a [u8]> {
         self.data.get(..size)
     }
@@ -663,6 +720,8 @@ impl<'a> Unstructured<'a> {
         &'b mut self,
     ) -> Result<ArbitraryIter<'a, 'b, ElementType>> {
         Ok(ArbitraryIter {
+            #[cfg(feature = "simple-encoding")]
+            cnt: self.arbitrary_u32()?,
             u: &mut *self,
             _marker: PhantomData,
         })
@@ -674,9 +733,11 @@ impl<'a> Unstructured<'a> {
     /// This is useful for implementing [`Arbitrary::arbitrary_take_rest`] on collections
     /// since the implementation is simply `u.arbitrary_take_rest_iter()?.collect()`
     pub fn arbitrary_take_rest_iter<ElementType: Arbitrary<'a>>(
-        self,
+        #[cfg_attr(not(feature = "simple-encoding"), expect(unused_mut))] mut self,
     ) -> Result<ArbitraryTakeRestIter<'a, ElementType>> {
         Ok(ArbitraryTakeRestIter {
+            #[cfg(feature = "simple-encoding")]
+            cnt: self.arbitrary_u32()?,
             u: self,
             _marker: PhantomData,
         })
@@ -765,14 +826,38 @@ impl<'a> Unstructured<'a> {
     }
 }
 
+#[cfg(feature = "simple-encoding")]
+fn arbitrary_iter_helper<'a, T: Arbitrary<'a>>(
+    cnt: &mut u32,
+    u: &mut Unstructured<'a>,
+) -> Option<Result<T>> {
+    if *cnt == 0 {
+        return None;
+    }
+    *cnt -= 1;
+    let res = Arbitrary::arbitrary(u);
+    if res.is_err() {
+        *cnt = 0;
+    }
+    Some(res)
+}
+
 /// Utility iterator produced by [`Unstructured::arbitrary_iter`]
 pub struct ArbitraryIter<'a, 'b, ElementType> {
     u: &'b mut Unstructured<'a>,
+    #[cfg(feature = "simple-encoding")]
+    cnt: u32,
     _marker: PhantomData<ElementType>,
 }
 
 impl<'a, ElementType: Arbitrary<'a>> Iterator for ArbitraryIter<'a, '_, ElementType> {
     type Item = Result<ElementType>;
+
+    #[cfg(feature = "simple-encoding")]
+    fn next(&mut self) -> Option<Result<ElementType>> {
+        arbitrary_iter_helper(&mut self.cnt, self.u)
+    }
+    #[cfg(not(feature = "simple-encoding"))]
     fn next(&mut self) -> Option<Result<ElementType>> {
         let keep_going = self.u.arbitrary().unwrap_or(false);
         if keep_going {
@@ -786,11 +871,19 @@ impl<'a, ElementType: Arbitrary<'a>> Iterator for ArbitraryIter<'a, '_, ElementT
 /// Utility iterator produced by [`Unstructured::arbitrary_take_rest_iter`]
 pub struct ArbitraryTakeRestIter<'a, ElementType> {
     u: Unstructured<'a>,
+    #[cfg(feature = "simple-encoding")]
+    cnt: u32,
     _marker: PhantomData<ElementType>,
 }
 
 impl<'a, ElementType: Arbitrary<'a>> Iterator for ArbitraryTakeRestIter<'a, ElementType> {
     type Item = Result<ElementType>;
+
+    #[cfg(feature = "simple-encoding")]
+    fn next(&mut self) -> Option<Result<ElementType>> {
+        arbitrary_iter_helper(&mut self.cnt, &mut self.u)
+    }
+    #[cfg(not(feature = "simple-encoding"))]
     fn next(&mut self) -> Option<Result<ElementType>> {
         let keep_going = self.u.arbitrary().unwrap_or(false);
         if keep_going {
@@ -841,7 +934,13 @@ pub trait Int:
     const MAX: Self;
 
     #[doc(hidden)]
+    const BYTES: usize;
+
+    #[doc(hidden)]
     fn from_u8(b: u8) -> Self;
+
+    #[doc(hidden)]
+    fn from_le_bytes(b: &[u8]) -> Option<Self>;
 
     #[doc(hidden)]
     fn from_usize(u: usize) -> Self;
@@ -874,8 +973,14 @@ macro_rules! impl_int {
 
                 const MAX: Self = Self::MAX;
 
+                const BYTES: usize = (<$ty>::BITS / 8) as usize;
+
                 fn from_u8(b: u8) -> Self {
                     b as Self
+                }
+
+                fn from_le_bytes(b: &[u8]) -> Option<Self> {
+                    Some(<$ty>::from_le_bytes(b.try_into().ok()?))
                 }
 
                 fn from_usize(u: usize) -> Self {
@@ -926,6 +1031,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn test_byte_size() {
         let mut u = Unstructured::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 6]);
         // Should take one byte off the end
@@ -941,6 +1047,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn int_in_range_of_one() {
         let mut u = Unstructured::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 6]);
         let x = u.int_in_range(0..=0).unwrap();
@@ -950,6 +1057,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn int_in_range_uses_minimal_amount_of_bytes() {
         let mut u = Unstructured::new(&[1, 2]);
         assert_eq!(1, u.int_in_range::<u8>(0..=u8::MAX).unwrap());
@@ -965,6 +1073,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn int_in_range_in_bounds() {
         for input in u8::MIN..=u8::MAX {
             let input = [input];
@@ -980,6 +1089,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn int_in_range_covers_unsigned_range() {
         // Test that we generate all values within the range given to
         // `int_in_range`.
@@ -1024,6 +1134,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(feature = "simple-encoding", ignore)]
     fn int_in_range_covers_signed_range() {
         // Test that we generate all values within the range given to
         // `int_in_range`.

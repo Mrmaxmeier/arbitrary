@@ -3,6 +3,13 @@ use {
     core::str,
 };
 
+#[cfg(feature = "simple-encoding")]
+fn arbitrary_str<'a>(u: &mut Unstructured<'a>, size: usize) -> Result<&'a str> {
+    let bytes = u.bytes(size)?;
+    str::from_utf8(bytes).map_err(|_| crate::Error::InvalidValue)
+}
+
+#[cfg(not(feature = "simple-encoding"))]
 fn arbitrary_str<'a>(u: &mut Unstructured<'a>, size: usize) -> Result<&'a str> {
     match str::from_utf8(u.peek_bytes(size).unwrap()) {
         Ok(s) => {
