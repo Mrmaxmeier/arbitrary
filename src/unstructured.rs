@@ -346,8 +346,9 @@ impl<'a> Unstructured<'a> {
         let buf = &mut buf[..T::Unsigned::BYTES];
         self.fill_buffer(buf)?;
 
-        let Some(res) = T::from_le_bytes(buf) else {
-            unreachable!()
+        let res = match T::from_le_bytes(buf) {
+            Some(res) => res,
+            None => unreachable!(),
         };
 
         if res < start || res > end {

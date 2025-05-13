@@ -23,5 +23,8 @@ proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2", features = ['derive', 'parsing', 'extra-traits'] }
 
+[features]
+simple-encoding = []
+
 [lib]
 proc-macro = true

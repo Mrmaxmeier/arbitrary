@@ -56,20 +56,31 @@ fn expand_derive_arbitrary(input: syn::DeriveInput) -> Result<TokenStream> {
     // Build TypeGenerics and WhereClause without a lifetime
     let (_, ty_generics, where_clause) = generics.split_for_impl();
 
-    Ok(quote! {
-        const _: () = {
-            ::std::thread_local! {
-                #[allow(non_upper_case_globals)]
-                static #recursive_count: ::core::cell::Cell<u32> = ::core::cell::Cell::new(0);
-            }
+    if cfg!(feature = "simple-encoding") {
+        Ok(quote! {
+            const _: () = {
+                #[automatically_derived]
+                impl #impl_generics arbitrary::Arbitrary<#lifetime_without_bounds> for #name #ty_generics #where_clause {
+                    #arbitrary_method
+                }
+            };
+        })
+    } else {
+        Ok(quote! {
+            const _: () = {
+                ::std::thread_local! {
+                    #[allow(non_upper_case_globals)]
+                    static #recursive_count: ::core::cell::Cell<u32> = ::core::cell::Cell::new(0);
+                }
 
-            #[automatically_derived]
-            impl #impl_generics arbitrary::Arbitrary<#lifetime_without_bounds> for #name #ty_generics #where_clause {
-                #arbitrary_method
-                #size_hint_method
-            }
-        };
-    })
+                #[automatically_derived]
+                impl #impl_generics arbitrary::Arbitrary<#lifetime_without_bounds> for #name #ty_generics #where_clause {
+                    #arbitrary_method
+                    #size_hint_method
+                }
+            };
+        })
+    }
 }
 
 // Returns: (lifetime without bounds, lifetime with bounds)
@@ -147,6 +158,16 @@ fn add_trait_bounds(mut generics: Generics, lifetime: LifetimeParam) -> Generics
     generics
 }
 
+#[cfg(feature = "simple-encoding")]
+fn with_recursive_count_guard(
+    recursive_count: &syn::Ident,
+    expr: impl quote::ToTokens,
+) -> impl quote::ToTokens {
+    let _ = recursive_count;
+    expr
+}
+
+#[cfg(not(feature = "simple-encoding"))]
 fn with_recursive_count_guard(
     recursive_count: &syn::Ident,
     expr: impl quote::ToTokens,
@@ -193,15 +214,22 @@ fn gen_arbitrary_method(
         let take_rest_body =
             with_recursive_count_guard(recursive_count, quote! { Ok(#ident #arbitrary_take_rest) });
 
-        Ok(quote! {
-            fn arbitrary(u: &mut arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
-                #body
-            }
-
-            fn arbitrary_take_rest(mut u: arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
-                #take_rest_body
-            }
-        })
+        if cfg!(feature = "simple-encoding") {
+            Ok(quote! {
+                fn arbitrary(u: &mut arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
+                    #body
+                }
+            })
+        } else {
+            Ok(quote! {
+                fn arbitrary(u: &mut arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
+                    #body
+                }
+                fn arbitrary_take_rest(mut u: arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
+                    #take_rest_body
+                }
+            })
+        }
     }
 
     fn arbitrary_variant(
@@ -213,6 +241,7 @@ fn gen_arbitrary_method(
         quote! { #index => #enum_name::#variant_name #ctor }
     }
 
+    #[cfg(not(feature = "simple-encoding"))]
     fn arbitrary_enum_method(
         recursive_count: &syn::Ident,
         unstructured: TokenStream,
@@ -231,6 +260,21 @@ fn gen_arbitrary_method(
                 })
             },
         )
+    }
+
+    #[cfg(feature = "simple-encoding")]
+    fn arbitrary_enum_method(
+        _recursive_count: &syn::Ident,
+        unstructured: TokenStream,
+        variants: &[TokenStream],
+    ) -> impl quote::ToTokens {
+        let count = variants.len();
+        quote! {
+            Ok(match #unstructured.choose_index(#count)? as u64 {
+                #(#variants,)*
+                _ => unreachable!(),
+            })
+        }
     }
 
     fn arbitrary_enum(
@@ -278,13 +322,21 @@ fn gen_arbitrary_method(
                 let arbitrary = arbitrary_enum_method(recursive_count, quote! { u }, &variants);
                 let arbitrary_take_rest = arbitrary_enum_method(recursive_count, quote! { &mut u }, &variants_take_rest);
 
-                quote! {
-                    fn arbitrary(u: &mut arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
-                        #arbitrary
+                if cfg!(feature = "simple-encoding") {
+                    quote! {
+                        fn arbitrary(u: &mut arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
+                            #arbitrary
+                        }
                     }
+                } else {
+                    quote! {
+                        fn arbitrary(u: &mut arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
+                            #arbitrary
+                        }
 
-                    fn arbitrary_take_rest(mut u: arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
-                        #arbitrary_take_rest
+                        fn arbitrary_take_rest(mut u: arbitrary::Unstructured<#lifetime>) -> arbitrary::Result<Self> {
+                            #arbitrary_take_rest
+                        }
                     }
                 }
             })
@@ -343,7 +395,7 @@ fn construct_take_rest(fields: &Fields) -> Result<TokenStream> {
         determine_field_constructor(field).map(|field_constructor| match field_constructor {
             FieldConstructor::Default => quote!(::core::default::Default::default()),
             FieldConstructor::Arbitrary => {
-                if idx + 1 == fields.len() {
+                if idx + 1 == fields.len() && cfg!(not(feature = "simple-encoding")) {
                     quote! { arbitrary::Arbitrary::arbitrary_take_rest(u)? }
                 } else {
                     quote! { arbitrary::Arbitrary::arbitrary(&mut u)? }

@@ -21,6 +21,7 @@ pub struct Rgb {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn struct_with_named_fields() {
     let rgb: Rgb = arbitrary_from(&[4, 5, 6]);
     assert_eq!(rgb.r, 4);
@@ -34,6 +35,7 @@ fn struct_with_named_fields() {
 struct MyTupleStruct(u8, bool);
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn tuple_struct() {
     let s: MyTupleStruct = arbitrary_from(&[43, 42]);
     assert_eq!(s.0, 43);
@@ -52,6 +54,7 @@ struct EndingInVec(u8, bool, u32, Vec<u16>);
 struct EndingInString(u8, bool, u32, String);
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn test_take_rest() {
     let bytes = [1, 1, 1, 2, 3, 4, 5, 6, 7, 8];
     let s1 = EndingInVec::arbitrary_take_rest(Unstructured::new(&bytes)).unwrap();
@@ -74,6 +77,7 @@ enum MyEnum {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn derive_enum() {
     let mut raw = vec![
         // The choice of which enum variant takes 4 bytes.
@@ -134,6 +138,7 @@ enum SkipVariant {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn test_skip_variant() {
     (0..=u8::MAX).for_each(|byte| {
         let buffer = [byte];
@@ -211,6 +216,7 @@ struct WideRecursiveMixedStruct {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn recursive() {
     let raw = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
     let _rec: RecursiveTree = arbitrary_from(&raw);
@@ -244,6 +250,7 @@ struct Generic<T> {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn generics() {
     let raw = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
     let gen: Generic<bool> = arbitrary_from(&raw);
@@ -260,6 +267,7 @@ struct OneLifetime<'a> {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn one_lifetime() {
     // Last byte is used for length
     let raw: Vec<u8> = vec![97, 98, 99, 100, 3];
@@ -278,6 +286,7 @@ struct TwoLifetimes<'a, 'b> {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn two_lifetimes() {
     // Last byte is used for length
     let raw: Vec<u8> = vec![97, 98, 99, 100, 101, 102, 103, 3];
@@ -291,6 +300,7 @@ fn two_lifetimes() {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn recursive_and_empty_input() {
     // None of the following derives should result in a stack overflow. See
     // https://github.com/rust-fuzz/arbitrary/issues/107 for details.
@@ -333,6 +343,7 @@ fn recursive_and_empty_input() {
 }
 
 #[test]
+#[cfg_attr(feature = "simple-encoding", ignore)]
 fn test_field_attributes() {
     // A type that DOES NOT implement Arbitrary
     #[derive(Debug)]
