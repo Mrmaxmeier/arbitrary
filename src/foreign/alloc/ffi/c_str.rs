@@ -1,5 +1,5 @@
 use {
-    crate::{Arbitrary, Result, Unstructured},
+    crate::{Arbitrary, Destructured, Result, Unstructured},
     std::ffi::CString,
 };
 
@@ -15,6 +15,11 @@ impl<'a> Arbitrary<'a> for CString {
             // it has no interior nul bytes.
             unsafe { Self::from_vec_unchecked(x) }
         })
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        // `arbitrary` drops nul bytes, and a `CString` never contains any.
+        d.push_iter(self.as_bytes())
     }
 
     #[inline]

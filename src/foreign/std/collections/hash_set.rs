@@ -1,5 +1,5 @@
 use {
-    crate::{Arbitrary, Result, Unstructured},
+    crate::{Arbitrary, Destructured, Result, Unstructured},
     std::{
         collections::hash_set::HashSet,
         hash::{BuildHasher, Hash},
@@ -13,6 +13,10 @@ where
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         u.arbitrary_iter()?.collect()
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push_iter(self)
     }
 
     fn arbitrary_take_rest(u: Unstructured<'a>) -> Result<Self> {

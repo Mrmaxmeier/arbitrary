@@ -1,5 +1,5 @@
 use {
-    crate::{size_hint, Arbitrary, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Result, Unstructured},
     core::cmp::Reverse,
 };
 
@@ -9,6 +9,10 @@ where
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Arbitrary::arbitrary(u).map(Self)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&self.0)
     }
 
     #[inline]

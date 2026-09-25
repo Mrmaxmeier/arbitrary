@@ -1,5 +1,5 @@
 use {
-    crate::{size_hint, Arbitrary, MaxRecursionReached, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Error, MaxRecursionReached, Result, Unstructured},
     core::{
         mem,
         ops::{Bound, Range, RangeBounds, RangeFrom, RangeInclusive, RangeTo, RangeToInclusive},
@@ -12,7 +12,8 @@ macro_rules! impl_range {
         $value_closure:expr,
         $value_ty:ty,
         $fun:ident($fun_closure:expr),
-        $size_hint_closure:expr
+        $size_hint_closure:expr,
+        $encodable:ident
     ) => {
         impl<'a, A> Arbitrary<'a> for $range
         where
@@ -21,6 +22,15 @@ macro_rules! impl_range {
             fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
                 let value: $value_ty = Arbitrary::arbitrary(u)?;
                 Ok($fun(value, $fun_closure))
+            }
+
+            fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+                #[allow(clippy::redundant_closure_call)]
+                let value: $value_ty = ($value_closure)(self);
+                if !$encodable(&value) {
+                    return Err(Error::Unencodable);
+                }
+                d.push(&value)
             }
 
             #[inline]
@@ -44,14 +54,16 @@ impl_range!(
     |depth| Ok(crate::size_hint::and(
         <A as Arbitrary>::try_size_hint(depth)?,
         <A as Arbitrary>::try_size_hint(depth)?,
-    ))
+    )),
+    bounded_range_encodable
 );
 impl_range!(
     RangeFrom<A>,
     |r: &RangeFrom<A>| r.start.clone(),
     A,
     unbounded_range(|a| a..),
-    |depth| <A as Arbitrary>::try_size_hint(depth)
+    |depth| <A as Arbitrary>::try_size_hint(depth),
+    unbounded_range_encodable
 );
 impl_range!(
     RangeInclusive<A>,
@@ -61,21 +73,24 @@ impl_range!(
     |depth| Ok(crate::size_hint::and(
         <A as Arbitrary>::try_size_hint(depth)?,
         <A as Arbitrary>::try_size_hint(depth)?,
-    ))
+    )),
+    bounded_range_encodable
 );
 impl_range!(
     RangeTo<A>,
     |r: &RangeTo<A>| r.end.clone(),
     A,
     unbounded_range(|b| ..b),
-    |depth| <A as Arbitrary>::try_size_hint(depth)
+    |depth| <A as Arbitrary>::try_size_hint(depth),
+    unbounded_range_encodable
 );
 impl_range!(
     RangeToInclusive<A>,
     |r: &RangeToInclusive<A>| r.end.clone(),
     A,
     unbounded_range(|b| ..=b),
-    |depth| <A as Arbitrary>::try_size_hint(depth)
+    |depth| <A as Arbitrary>::try_size_hint(depth),
+    unbounded_range_encodable
 );
 
 pub(crate) fn bounded_range<CB, I, R>(bounds: (I, I), cb: CB) -> R
@@ -89,6 +104,15 @@ where
         mem::swap(&mut start, &mut end);
     }
     cb((start, end))
+}
+
+// `bounded_range` never produces a range with `start > end`.
+fn bounded_range_encodable<I: PartialOrd>((start, end): &(I, I)) -> bool {
+    start.partial_cmp(end) != Some(core::cmp::Ordering::Greater)
+}
+
+fn unbounded_range_encodable<I>(_: &I) -> bool {
+    true
 }
 
 pub(crate) fn unbounded_range<CB, I, R>(bound: I, cb: CB) -> R
@@ -109,6 +133,20 @@ where
             1 => Ok(Bound::Excluded(A::arbitrary(u)?)),
             2 => Ok(Bound::Unbounded),
             _ => unreachable!(),
+        }
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        match self {
+            Bound::Included(value) => {
+                d.push_int_in_range::<u8>(0..=2, 0)?;
+                d.push(value)
+            }
+            Bound::Excluded(value) => {
+                d.push_int_in_range::<u8>(0..=2, 1)?;
+                d.push(value)
+            }
+            Bound::Unbounded => d.push_int_in_range::<u8>(0..=2, 2),
         }
     }
 

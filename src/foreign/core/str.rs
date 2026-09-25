@@ -1,5 +1,5 @@
 use {
-    crate::{Arbitrary, Result, Unstructured},
+    crate::{Arbitrary, Destructured, Result, Unstructured},
     core::str,
 };
 
@@ -40,6 +40,14 @@ impl<'a> Arbitrary<'a> for &'a str {
     fn arbitrary_take_rest(mut u: Unstructured<'a>) -> Result<Self> {
         let size = u.len();
         arbitrary_str(&mut u, size)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        self.as_bytes().to_arbitrary_bytes(d)
+    }
+
+    fn to_arbitrary_take_rest_bytes(&self, d: &mut Destructured) -> Result<()> {
+        self.as_bytes().to_arbitrary_take_rest_bytes(d)
     }
 
     #[inline]

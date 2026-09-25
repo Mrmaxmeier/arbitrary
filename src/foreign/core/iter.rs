@@ -1,5 +1,5 @@
 use {
-    crate::{Arbitrary, Result, Unstructured},
+    crate::{Arbitrary, Destructured, Result, Unstructured},
     core::iter::{empty, Empty},
 };
 
@@ -9,6 +9,11 @@ where
 {
     fn arbitrary(_: &mut Unstructured<'a>) -> Result<Self> {
         Ok(empty())
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        let _ = d;
+        Ok(())
     }
 
     #[inline]

@@ -1,11 +1,15 @@
 use {
-    crate::{size_hint, Arbitrary, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Result, Unstructured},
     std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
 };
 
 impl<'a> Arbitrary<'a> for Ipv4Addr {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Ok(Ipv4Addr::from(u32::arbitrary(u)?))
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&u32::from(*self))
     }
 
     #[inline]
@@ -17,6 +21,10 @@ impl<'a> Arbitrary<'a> for Ipv4Addr {
 impl<'a> Arbitrary<'a> for Ipv6Addr {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Ok(Ipv6Addr::from(u128::arbitrary(u)?))
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&u128::from(*self))
     }
 
     #[inline]
@@ -34,6 +42,19 @@ impl<'a> Arbitrary<'a> for IpAddr {
         }
     }
 
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        match self {
+            IpAddr::V4(addr) => {
+                d.push(&true)?;
+                d.push(addr)
+            }
+            IpAddr::V6(addr) => {
+                d.push(&false)?;
+                d.push(addr)
+            }
+        }
+    }
+
     fn size_hint(depth: usize) -> (usize, Option<usize>) {
         size_hint::and(
             bool::size_hint(depth),
@@ -45,6 +66,11 @@ impl<'a> Arbitrary<'a> for IpAddr {
 impl<'a> Arbitrary<'a> for SocketAddrV4 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Ok(SocketAddrV4::new(u.arbitrary()?, u.arbitrary()?))
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(self.ip())?;
+        d.push(&self.port())
     }
 
     #[inline]
@@ -61,6 +87,13 @@ impl<'a> Arbitrary<'a> for SocketAddrV6 {
             u.arbitrary()?,
             u.arbitrary()?,
         ))
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(self.ip())?;
+        d.push(&self.port())?;
+        d.push(&self.flowinfo())?;
+        d.push(&self.scope_id())
     }
 
     #[inline]
@@ -81,6 +114,19 @@ impl<'a> Arbitrary<'a> for SocketAddr {
             Ok(SocketAddr::V4(u.arbitrary()?))
         } else {
             Ok(SocketAddr::V6(u.arbitrary()?))
+        }
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        match self {
+            SocketAddr::V4(addr) => {
+                d.push(&true)?;
+                d.push(addr)
+            }
+            SocketAddr::V6(addr) => {
+                d.push(&false)?;
+                d.push(addr)
+            }
         }
     }
 

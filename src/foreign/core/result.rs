@@ -1,4 +1,4 @@
-use crate::{size_hint, Arbitrary, Error, MaxRecursionReached, Unstructured};
+use crate::{size_hint, Arbitrary, Destructured, Error, MaxRecursionReached, Unstructured};
 
 impl<'a, T, E> Arbitrary<'a> for Result<T, E>
 where
@@ -11,6 +11,19 @@ where
         } else {
             Err(<E as Arbitrary>::arbitrary(u)?)
         })
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<(), Error> {
+        match self {
+            Ok(value) => {
+                d.push(&true)?;
+                d.push(value)
+            }
+            Err(value) => {
+                d.push(&false)?;
+                d.push(value)
+            }
+        }
     }
 
     #[inline]

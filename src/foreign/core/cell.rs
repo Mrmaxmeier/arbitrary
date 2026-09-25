@@ -1,5 +1,5 @@
 use {
-    crate::{Arbitrary, MaxRecursionReached, Result, Unstructured},
+    crate::{Arbitrary, Destructured, Error, MaxRecursionReached, Result, Unstructured},
     core::cell::{Cell, RefCell, UnsafeCell},
 };
 
@@ -28,6 +28,10 @@ where
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Arbitrary::arbitrary(u).map(Self::new)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&*self.try_borrow().map_err(|_| Error::Unencodable)?)
     }
 
     #[inline]

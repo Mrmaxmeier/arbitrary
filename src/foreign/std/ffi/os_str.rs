@@ -1,11 +1,16 @@
 use {
-    crate::{Arbitrary, Result, Unstructured},
+    crate::{Arbitrary, Destructured, Error, Result, Unstructured},
     std::ffi::OsString,
 };
 
 impl<'a> Arbitrary<'a> for OsString {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         <String as Arbitrary>::arbitrary(u).map(From::from)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        // `arbitrary` only produces valid UTF-8.
+        d.push(&self.to_str().ok_or(Error::Unencodable)?)
     }
 
     #[inline]

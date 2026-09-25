@@ -860,6 +860,9 @@ pub trait Int:
 
     #[doc(hidden)]
     fn from_unsigned(unsigned: Self::Unsigned) -> Self;
+
+    #[doc(hidden)]
+    fn to_u128(self) -> u128;
 }
 
 macro_rules! impl_int {
@@ -900,6 +903,10 @@ macro_rules! impl_int {
 
                 fn from_unsigned(unsigned: $unsigned_ty) -> Self {
                     unsigned as Self
+                }
+
+                fn to_u128(self) -> u128 {
+                    self as u128
                 }
             }
         )*

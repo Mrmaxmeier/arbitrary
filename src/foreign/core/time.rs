@@ -1,5 +1,5 @@
 use {
-    crate::{size_hint, Arbitrary, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Result, Unstructured},
     core::time::Duration,
 };
 
@@ -10,6 +10,11 @@ impl<'a> Arbitrary<'a> for Duration {
             <u64 as Arbitrary>::arbitrary(u)?,
             u.int_in_range(0..=999_999_999)?,
         ))
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&self.as_secs())?;
+        d.push_int_in_range(0..=999_999_999, self.subsec_nanos())
     }
 
     #[inline]

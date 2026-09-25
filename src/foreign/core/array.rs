@@ -1,5 +1,5 @@
 use {
-    crate::{size_hint, Arbitrary, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Result, Unstructured},
     core::{
         array,
         mem::{self, MaybeUninit},
@@ -83,6 +83,24 @@ where
             *last = Arbitrary::arbitrary_take_rest(u)?;
         }
         Ok(array)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        for element in self {
+            element.to_arbitrary_bytes(d)?;
+        }
+        Ok(())
+    }
+
+    fn to_arbitrary_take_rest_bytes(&self, d: &mut Destructured) -> Result<()> {
+        // `arbitrary_take_rest` first decodes a whole array and then decodes the
+        // last element a second time, from the rest of the data. Any encoding
+        // works for the discarded first copy, so reuse the real last element.
+        self.to_arbitrary_bytes(d)?;
+        match self.last() {
+            Some(last) => last.to_arbitrary_take_rest_bytes(d),
+            None => Ok(()),
+        }
     }
 
     #[inline]

@@ -1,4 +1,4 @@
-use crate::{Arbitrary, Result, Unstructured};
+use crate::{Arbitrary, Destructured, Result, Unstructured};
 
 /// Returns '\0', not an error, if this `Unstructured` [is empty][Unstructured::is_empty].
 impl<'a> Arbitrary<'a> for char {
@@ -16,6 +16,12 @@ impl<'a> Arbitrary<'a> for char {
             Ok(char::from_u32(c)
                 .expect("Generated character should be valid! This is a bug in arbitrary-rs"))
         }
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        // Every `char` is below `CHAR_END` and not a surrogate, so it round
+        // trips through `arbitrary` unchanged.
+        d.push(&(*self as u32))
     }
 
     #[inline]

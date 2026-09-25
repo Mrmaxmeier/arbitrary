@@ -38,6 +38,7 @@ fn expand_derive_arbitrary(input: syn::DeriveInput) -> Result<TokenStream> {
     let (arbitrary_method, needs_recursive_count) =
         gen_arbitrary_method(&input, lifetime_without_bounds.clone(), &recursive_count)?;
     let size_hint_method = gen_size_hint_method(&input, needs_recursive_count)?;
+    let to_bytes_method = gen_to_bytes_method(&input, &lifetime_without_bounds)?;
     let name = input.ident;
 
     // Apply user-supplied bounds or automatic `T: ArbitraryBounds`.
@@ -78,6 +79,7 @@ fn expand_derive_arbitrary(input: syn::DeriveInput) -> Result<TokenStream> {
             {
                 #arbitrary_method
                 #size_hint_method
+                #to_bytes_method
             }
         };
     })
@@ -487,6 +489,137 @@ fn gen_size_hint_method(input: &DeriveInput, needs_recursive_count: bool) -> Res
                     }
                 }
             }),
+    }
+}
+
+fn gen_to_bytes_method(input: &DeriveInput, lifetime: &LifetimeParam) -> Result<TokenStream> {
+    // Encodes `fields`, which are accessed as `access(index, field)`, in the
+    // order that `construct` decodes them. With `take_rest`, the last field
+    // is encoded for `construct_take_rest` instead.
+    let encode_fields = |fields: &Fields,
+                         take_rest: bool,
+                         access: &dyn Fn(usize, &Field) -> TokenStream|
+     -> Result<TokenStream> {
+        let encoded = fields
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| {
+                // Leave the `Arbitrary` lifetime to inference: a `&'a str`
+                // field only implements `Arbitrary<'a>`, not
+                // `Arbitrary<'arbitrary>`.
+                let access = access(idx, field);
+                determine_field_constructor(field).map(|constructor| match constructor {
+                    // These consume no data.
+                    FieldConstructor::Default | FieldConstructor::Value(_) => quote!(),
+                    FieldConstructor::Arbitrary => {
+                        if take_rest && idx + 1 == fields.len() {
+                            quote! {
+                                arbitrary::Arbitrary::to_arbitrary_take_rest_bytes(#access, d)?;
+                            }
+                        } else {
+                            quote! {
+                                arbitrary::Arbitrary::to_arbitrary_bytes(#access, d)?;
+                            }
+                        }
+                    }
+                    // There is no way to invert a user-supplied function.
+                    FieldConstructor::With(_) => {
+                        quote!(return ::core::result::Result::Err(arbitrary::Error::Unencodable);)
+                    }
+                })
+            })
+            .collect::<Result<Vec<TokenStream>>>()?;
+        Ok(quote!(#(#encoded)*))
+    };
+
+    let method = |name: TokenStream, body: TokenStream| {
+        quote! {
+            #[allow(unreachable_code, unused_variables)]
+            fn #name(&self, d: &mut arbitrary::Destructured) -> arbitrary::Result<()> {
+                #body
+                ::core::result::Result::Ok(())
+            }
+        }
+    };
+
+    let encode_both = |encode: &dyn Fn(bool) -> Result<TokenStream>| -> Result<TokenStream> {
+        let to_bytes = method(quote!(to_arbitrary_bytes), encode(false)?);
+        let to_take_rest_bytes = method(quote!(to_arbitrary_take_rest_bytes), encode(true)?);
+        Ok(quote!(#to_bytes #to_take_rest_bytes))
+    };
+
+    let binding = |idx: usize| quote::format_ident!("__arbitrary_field_{}", idx);
+
+    match &input.data {
+        Data::Struct(data) => encode_both(&|take_rest| {
+            encode_fields(&data.fields, take_rest, &|idx, field| match &field.ident {
+                Some(ident) => quote!(&self.#ident),
+                None => {
+                    let idx = Index::from(idx);
+                    quote!(&self.#idx)
+                }
+            })
+        }),
+        // Reading a union field requires knowing which field is active.
+        Data::Union(_) => encode_both(&|_| {
+            Ok(quote!(return ::core::result::Result::Err(arbitrary::Error::Unencodable);))
+        }),
+        Data::Enum(data) => {
+            let count = data.variants.iter().filter(not_skipped).count() as u128;
+            encode_both(&|take_rest| {
+                let enum_name = &input.ident;
+                let mut index = 0u128;
+                let arms = data
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let variant_name = &variant.ident;
+                        if !not_skipped(&variant) {
+                            return Ok(quote! {
+                                #enum_name::#variant_name { .. } => {
+                                    return ::core::result::Result::Err(arbitrary::Error::Unencodable);
+                                }
+                            });
+                        }
+                        // The smallest `tag` for which `(tag * count) >> 32 == index`,
+                        // see `arbitrary_enum_method`.
+                        let tag = (((index << 32) + count - 1) / count) as u32;
+                        index += 1;
+                        let pattern = match &variant.fields {
+                            Fields::Named(fields) => {
+                                let bindings = fields.named.iter().enumerate().map(|(idx, field)| {
+                                    let ident = field.ident.as_ref().unwrap();
+                                    let binding = binding(idx);
+                                    quote!(#ident: #binding)
+                                });
+                                quote!({ #(#bindings),* })
+                            }
+                            Fields::Unnamed(fields) => {
+                                let bindings = (0..fields.unnamed.len()).map(binding);
+                                quote!(( #(#bindings),* ))
+                            }
+                            Fields::Unit => quote!(),
+                        };
+                        let fields =
+                            encode_fields(&variant.fields, take_rest, &|idx, _| {
+                                let binding = binding(idx);
+                                quote!(#binding)
+                            })?;
+                        Ok(quote! {
+                            #enum_name::#variant_name #pattern => {
+                                <u32 as arbitrary::Arbitrary<#lifetime>>::to_arbitrary_bytes(&#tag, d)?;
+                                #fields
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<TokenStream>>>()?;
+                Ok(quote! {
+                    match self {
+                        #(#arms)*
+                    }
+                })
+            })
+        }
     }
 }
 

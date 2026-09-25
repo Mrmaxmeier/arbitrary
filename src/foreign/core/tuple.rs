@@ -1,4 +1,4 @@
-use crate::{size_hint, Arbitrary, MaxRecursionReached, Result, Unstructured};
+use crate::{size_hint, Arbitrary, Destructured, MaxRecursionReached, Result, Unstructured};
 
 macro_rules! arbitrary_tuple {
     () => {};
@@ -19,6 +19,20 @@ macro_rules! arbitrary_tuple {
                 $(let $xs = $xs::arbitrary(&mut u)?;)*
                 let $last = $last::arbitrary_take_rest(u)?;
                 Ok(($($xs,)* $last,))
+            }
+
+            #[allow(non_snake_case)]
+            fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+                let ($($xs,)* $last,) = self;
+                $($xs.to_arbitrary_bytes(d)?;)*
+                $last.to_arbitrary_bytes(d)
+            }
+
+            #[allow(non_snake_case)]
+            fn to_arbitrary_take_rest_bytes(&self, d: &mut Destructured) -> Result<()> {
+                let ($($xs,)* $last,) = self;
+                $($xs.to_arbitrary_bytes(d)?;)*
+                $last.to_arbitrary_take_rest_bytes(d)
             }
 
             #[inline]

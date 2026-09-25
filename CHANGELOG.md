@@ -4,7 +4,13 @@ Released YYYY-MM-DD.
 
 ### Added
 
-* TODO (or remove section if none)
+* Added `Arbitrary::to_arbitrary_bytes` and
+  `Arbitrary::to_arbitrary_take_rest_bytes`, the inverses of `arbitrary` and
+  `arbitrary_take_rest`, along with the `Destructured` byte builder and the
+  `to_bytes` and `to_bytes_take_rest` helpers. They turn values back into raw
+  data that `arbitrary` decodes into the same value, e.g. for seeding fuzzing
+  corpora. `#[derive(Arbitrary)]` implements them.
+* Added `Error::Unencodable`.
 
 ### Changed
 

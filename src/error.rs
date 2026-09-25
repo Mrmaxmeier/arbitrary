@@ -15,6 +15,11 @@ pub enum Error {
     NotEnoughData,
     /// The input bytes were not of the right format
     IncorrectFormat,
+    /// The value cannot be encoded into bytes that `Arbitrary::arbitrary`
+    /// would decode back into it, either because `arbitrary` can never
+    /// produce that value or because the type does not implement
+    /// `Arbitrary::to_arbitrary_bytes`.
+    Unencodable,
 }
 
 impl fmt::Display for Error {
@@ -31,6 +36,10 @@ impl fmt::Display for Error {
             Error::IncorrectFormat => write!(
                 f,
                 "The raw data is not of the correct format to construct this type"
+            ),
+            Error::Unencodable => write!(
+                f,
+                "This value cannot be encoded into bytes that `Arbitrary` would decode back into it"
             ),
         }
     }

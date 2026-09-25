@@ -30,4 +30,11 @@ fn main() {
         .expect("`unstructured` has enough underlying data to create all variants of `MyEnum`");
 
     println!("Here is an arbitrary enum: {:?}", instance);
+
+    // Values can also be turned back into raw data that recreates them.
+    let raw = arbitrary::to_bytes(&instance).expect("`instance` is not a skipped variant");
+    let instance_again = MyEnum::arbitrary(&mut Unstructured::new(&raw))
+        .expect("`raw` has enough underlying data to recreate `instance`");
+
+    println!("Here it is again, from {:?}: {:?}", raw, instance_again);
 }

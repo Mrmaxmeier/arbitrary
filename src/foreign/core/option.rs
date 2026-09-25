@@ -1,4 +1,4 @@
-use crate::{size_hint, Arbitrary, MaxRecursionReached, Result, Unstructured};
+use crate::{size_hint, Arbitrary, Destructured, MaxRecursionReached, Result, Unstructured};
 
 /// Returns `None`, not an error, if this `Unstructured` [is empty][Unstructured::is_empty].
 impl<'a, A> Arbitrary<'a> for Option<A>
@@ -11,6 +11,16 @@ where
         } else {
             None
         })
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        match self {
+            Some(value) => {
+                d.push(&true)?;
+                d.push(value)
+            }
+            None => d.push(&false),
+        }
     }
 
     #[inline]

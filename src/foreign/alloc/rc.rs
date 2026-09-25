@@ -1,5 +1,5 @@
 use {
-    crate::{size_hint, Arbitrary, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Result, Unstructured},
     std::rc::Rc,
 };
 
@@ -9,6 +9,10 @@ where
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Arbitrary::arbitrary(u).map(Self::new)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&**self)
     }
 
     #[inline]
@@ -30,6 +34,10 @@ where
         u.arbitrary_iter()?.collect()
     }
 
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push_iter(self.iter())
+    }
+
     fn arbitrary_take_rest(u: Unstructured<'a>) -> Result<Self> {
         u.arbitrary_take_rest_iter()?.collect()
     }
@@ -43,6 +51,10 @@ where
 impl<'a> Arbitrary<'a> for Rc<str> {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         <&str as Arbitrary>::arbitrary(u).map(Into::into)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&&**self)
     }
 
     #[inline]

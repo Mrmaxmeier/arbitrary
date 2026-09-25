@@ -1,5 +1,5 @@
 use {
-    crate::{Arbitrary, MaxRecursionReached, Result, Unstructured},
+    crate::{Arbitrary, Destructured, MaxRecursionReached, Result, Unstructured},
     core::{
         mem,
         num::{
@@ -17,6 +17,11 @@ macro_rules! impl_arbitrary_for_integers {
                     let mut buf = [0; mem::size_of::<$ty>()];
                     u.fill_buffer(&mut buf)?;
                     Ok(Self::from_le_bytes(buf))
+                }
+
+                fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+                    d.push_bytes(&self.to_le_bytes());
+                    Ok(())
                 }
 
                 #[inline]
@@ -51,6 +56,10 @@ impl<'a> Arbitrary<'a> for usize {
         u.arbitrary::<u64>().map(|x| x as usize)
     }
 
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&(*self as u64))
+    }
+
     #[inline]
     fn size_hint(depth: usize) -> (usize, Option<usize>) {
         <u64 as Arbitrary>::size_hint(depth)
@@ -60,6 +69,10 @@ impl<'a> Arbitrary<'a> for usize {
 impl<'a> Arbitrary<'a> for isize {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         u.arbitrary::<i64>().map(|x| x as isize)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&(*self as i64))
     }
 
     #[inline]
@@ -74,6 +87,10 @@ macro_rules! impl_arbitrary_for_floats {
             impl<'a> Arbitrary<'a> for $ty {
                 fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
                     Ok(Self::from_bits(<$unsigned as Arbitrary<'a>>::arbitrary(u)?))
+                }
+
+                fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+                    d.push(&self.to_bits())
                 }
 
                 #[inline]
@@ -98,6 +115,10 @@ macro_rules! implement_nonzero_int {
                     Some(n) => Ok(n),
                     None => Ok(Self::new(<$int>::MAX).unwrap()),
                 }
+            }
+
+            fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+                d.push(&self.get())
             }
 
             #[inline]
@@ -127,6 +148,10 @@ where
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Arbitrary::arbitrary(u).map(Wrapping)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        d.push(&self.0)
     }
 
     #[inline]

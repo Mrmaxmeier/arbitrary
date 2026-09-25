@@ -1,5 +1,5 @@
 use {
-    crate::{size_hint, Arbitrary, Result, Unstructured},
+    crate::{size_hint, Arbitrary, Destructured, Result, Unstructured},
     std::borrow::{Cow, ToOwned},
 };
 
@@ -10,6 +10,13 @@ where
 {
     fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
         Arbitrary::arbitrary(u).map(Cow::Owned)
+    }
+
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        match self {
+            Cow::Owned(owned) => d.push(owned),
+            Cow::Borrowed(borrowed) => d.push(&(*borrowed).to_owned()),
+        }
     }
 
     #[inline]

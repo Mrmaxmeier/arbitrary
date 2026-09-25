@@ -22,6 +22,7 @@
 #![deny(rust_2018_idioms)]
 #![deny(unused)]
 
+pub mod destructured;
 mod error;
 mod foreign;
 pub mod size_hint;
@@ -37,6 +38,9 @@ pub use derive_arbitrary::*;
 
 #[doc(inline)]
 pub use unstructured::Unstructured;
+
+#[doc(inline)]
+pub use destructured::{to_bytes, to_bytes_take_rest, Destructured};
 
 /// Error indicating that the maximum recursion depth has been reached while calculating [`Arbitrary::size_hint`]()
 #[derive(Debug, Clone)]
@@ -422,6 +426,47 @@ pub trait Arbitrary<'a>: Sized {
     #[inline]
     fn try_size_hint(depth: usize) -> Result<(usize, Option<usize>), MaxRecursionReached> {
         Ok(Self::size_hint(depth))
+    }
+
+    /// Write the raw bytes that [`Arbitrary::arbitrary`] would decode back
+    /// into (a value equal to) `self`.
+    ///
+    /// This is the inverse of [`Arbitrary::arbitrary`]: after
+    ///
+    /// ```
+    /// # fn foo<'a, T: arbitrary::Arbitrary<'a>>(value: &T) -> arbitrary::Result<()> {
+    /// let bytes = arbitrary::to_bytes(value)?;
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// `T::arbitrary(&mut Unstructured::new(&bytes))` produces `value` again.
+    /// This is useful for turning known-interesting values into seed inputs
+    /// for a fuzzer.
+    ///
+    /// Not every value can be encoded, since not every value can be produced
+    /// by `arbitrary` (e.g. a `Range` with `start > end`), and not every type
+    /// implements this method. In those cases,
+    /// [`Error::Unencodable`] is returned.
+    ///
+    /// The default implementation always returns [`Error::Unencodable`].
+    /// `#[derive(Arbitrary)]` generates a working implementation, as long as
+    /// all fields implement this method.
+    fn to_arbitrary_bytes(&self, d: &mut Destructured) -> Result<()> {
+        let _ = d;
+        Err(Error::Unencodable)
+    }
+
+    /// Write the raw bytes that [`Arbitrary::arbitrary_take_rest`] would
+    /// decode back into (a value equal to) `self`.
+    ///
+    /// This must be the last thing written to `d`.
+    ///
+    /// The default implementation forwards to
+    /// [`Arbitrary::to_arbitrary_bytes`], mirroring the default
+    /// implementation of [`Arbitrary::arbitrary_take_rest`]. If you override
+    /// `arbitrary_take_rest`, you should override this method as well.
+    fn to_arbitrary_take_rest_bytes(&self, d: &mut Destructured) -> Result<()> {
+        self.to_arbitrary_bytes(d)
     }
 }
 
